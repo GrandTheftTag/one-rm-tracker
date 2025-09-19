@@ -129,7 +129,10 @@ function App() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSDu2vNtDYtDmRQGM4wB4m0O49Ups3YsEcIfq4TBIzLjQICIWIQD7e97s18vxZCtGtk7X17r4adq9PG/pub?gid=50642095_user_says:&single=true&output=csv';
+    // KORREKTUR: Die URL wurde korrigiert, um den Fehler beim Laden zu beheben.
+    const originalUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSDu2vNtDYtDmRQGM4wB4m0O49Ups3YsEcIfq4TBIzLjQICIWIQD7e97s18vxZCtGtk7X17r4adq9PG/pub?gid=506420951&single=true&output=csv';
+    const proxyUrl = 'https://api.allorigins.win/raw?url=';
+    const GOOGLE_SHEET_URL = `${proxyUrl}${encodeURIComponent(originalUrl)}`;
 
     const loadExercises = async () => {
       setIsLoading(true);
@@ -141,14 +144,15 @@ function App() {
         }
         const csvText = await response.text();
         
-        const rows = csvText.trim().split('\n').slice(1);
-        if (rows.length === 0) {
+        const rows = csvText.trim().split(/\r?\n/).slice(1); // Robusteres Splitting
+        if (rows.length === 0 || (rows.length === 1 && rows[0].trim() === '')) {
            setExercises([]);
            return;
         }
 
         const exercisesMap = new Map();
         rows.forEach((row) => {
+          if (row.trim() === '') return; // Leere Zeilen überspringen
           const [name, date, weight, reps] = row.split(',').map(s => s.trim());
           if (!name || !date || !weight || !reps) return;
 
@@ -171,11 +175,13 @@ function App() {
 
         const formattedExercises = Array.from(exercisesMap.values());
         formattedExercises.forEach(ex => {
-            // Konvertiert das Datum von TT.MM.JJJJ zu JJJJ-MM-TT für eine korrekte Sortierung
             ex.records.sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
         });
         
         setExercises(formattedExercises);
+        if (formattedExercises.length > 0) {
+          setSelectedExercise(formattedExercises[0]); // Automatisch die erste Übung auswählen
+        }
 
       } catch (err) {
         console.error("Fehler beim Laden oder Verarbeiten der Google Sheet-Daten:", err);
@@ -201,6 +207,8 @@ function App() {
           <h2>Übungen</h2>
           {isLoading ? (
             <div className="loading-message">Lade...</div>
+          ) : error ? (
+            <div className="error-message">Fehler</div>
           ) : (
             <ul className="exercise-list">
               {exercises.map(ex => (
@@ -219,9 +227,9 @@ function App() {
         <main className="main-content">
           {error ? (
              <div className="error-message">{error}</div>
-          ) : !selectedExercise ? (
+          ) : !selectedExercise && !isLoading ? (
             <div className="welcome-message">Wähle eine Übung aus, um Details zu sehen.</div>
-          ) : (
+          ) : selectedExercise && (
             <div className="exercise-details">
               <h1>{selectedExercise.name}</h1>
               <div className="chart-container">
