@@ -1,34 +1,25 @@
 {
   "name": "one-rm-tracker",
-  "version": "1.0.0",
-  "description": "1RM Tracker App – lokal für macOS mit Daten aus Google Sheets",
-  "main": "main.js",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
-    "build-react": "vite build",
-    "start": "npm run build-react && electron .",
-    "dist": "npm run build-react && electron-builder --mac"
-  },
-  "build": {
-    "appId": "com.deinname.onermtracker",
-    "mac": {
-      "target": "dmg"
-    },
-    "files": [
-      "dist/**/*",
-      "main.js",
-      "preload.js",
-      "package.json"
-    ]
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "recharts": "^2.10.3"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "vite": "^5.0.0",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.6.0"
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "eslint": "^8.45.0",
+    "eslint-plugin-react": "^7.32.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.3",
+    "vite": "^4.4.5"
   }
 }
