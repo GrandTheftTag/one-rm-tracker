@@ -44,6 +44,8 @@ const AppStyles = () => (
       padding: 20px;
       border-right: 1px solid var(--border-color);
       overflow-y: auto;
+      display: flex;
+      flex-direction: column;
     }
     .sidebar h2 {
       margin-top: 0;
@@ -82,17 +84,19 @@ const AppStyles = () => (
       flex-direction: column;
       overflow-y: auto;
     }
-    .welcome-message, .loading-message, .error-message {
+    .welcome-message, .loading-message, .error-message, .no-data-message {
       display: flex;
       justify-content: center;
       align-items: center;
       height: 100%;
-      font-size: 1.5rem;
+      text-align: center;
+      padding: 20px;
+      font-size: 1.2rem;
       color: #888;
+      flex-grow: 1;
     }
     .error-message {
       color: #e24a4a;
-      text-align: center;
       white-space: pre-wrap;
     }
     .exercise-details h1 {
@@ -129,7 +133,6 @@ function App() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // KORREKTUR: Die URL wurde korrigiert, um den Fehler beim Laden zu beheben.
     const originalUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSDu2vNtDYtDmRQGM4wB4m0O49Ups3YsEcIfq4TBIzLjQICIWIQD7e97s18vxZCtGtk7X17r4adq9PG/pub?gid=506420951&single=true&output=csv';
     const proxyUrl = 'https://api.allorigins.win/raw?url=';
     const GOOGLE_SHEET_URL = `${proxyUrl}${encodeURIComponent(originalUrl)}`;
@@ -137,50 +140,63 @@ function App() {
     const loadExercises = async () => {
       setIsLoading(true);
       setError(null);
+      console.log('Lade Daten von:', GOOGLE_SHEET_URL);
       try {
         const response = await fetch(GOOGLE_SHEET_URL);
         if (!response.ok) {
           throw new Error(`Netzwerk-Antwort war nicht ok. Status: ${response.status}`);
         }
         const csvText = await response.text();
+        console.log('Rohdaten empfangen:', csvText);
+
+        if (!csvText || csvText.trim() === '') {
+            throw new Error('Die empfangenen Daten sind leer. Bitte prüfen Sie die Google Sheet URL und Freigabe.');
+        }
         
-        const rows = csvText.trim().split(/\r?\n/).slice(1); // Robusteres Splitting
-        if (rows.length === 0 || (rows.length === 1 && rows[0].trim() === '')) {
+        const rows = csvText.trim().split(/\r?\n/).slice(1);
+        console.log(`Daten in ${rows.length} Zeilen aufgeteilt (ohne Kopfzeile).`);
+        
+        if (rows.length === 0) {
            setExercises([]);
            return;
         }
 
         const exercisesMap = new Map();
-        rows.forEach((row) => {
-          if (row.trim() === '') return; // Leere Zeilen überspringen
-          const [name, date, weight, reps] = row.split(',').map(s => s.trim());
-          if (!name || !date || !weight || !reps) return;
+        let invalidRowCount = 0;
+        rows.forEach((row, index) => {
+          if (row.trim() === '') return;
+          const columns = row.split(',').map(s => s.trim());
+          
+          if (columns.length < 4 || columns.slice(0, 4).some(c => c === '')) {
+            console.warn(`Zeile ${index + 2} wird übersprungen (ungültiges Format): "${row}"`);
+            invalidRowCount++;
+            return;
+          }
 
-          const record = {
-            date,
-            weight: parseFloat(weight),
-            reps: parseInt(reps, 10),
-          };
+          const [name, date, weight, reps] = columns;
+          const record = { date, weight: parseFloat(weight), reps: parseInt(reps, 10) };
 
           if (exercisesMap.has(name)) {
             exercisesMap.get(name).records.push(record);
           } else {
-            exercisesMap.set(name, {
-              id: exercisesMap.size + 1,
-              name: name,
-              records: [record],
-            });
+            exercisesMap.set(name, { id: exercisesMap.size + 1, name, records: [record] });
           }
         });
 
+        console.log(`Verarbeitung abgeschlossen. ${exercisesMap.size} Übungen gefunden. ${invalidRowCount} Zeilen übersprungen.`);
+        
         const formattedExercises = Array.from(exercisesMap.values());
+        if (formattedExercises.length === 0 && rows.length > 0) {
+            throw new Error(`Daten wurden geladen, aber es konnten keine gültigen Übungen extrahiert werden. Bitte prüfen Sie das Spaltenformat in Ihrem Google Sheet.`);
+        }
+
         formattedExercises.forEach(ex => {
             ex.records.sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
         });
         
         setExercises(formattedExercises);
         if (formattedExercises.length > 0) {
-          setSelectedExercise(formattedExercises[0]); // Automatisch die erste Übung auswählen
+          setSelectedExercise(formattedExercises[0]);
         }
 
       } catch (err) {
@@ -199,74 +215,82 @@ function App() {
     '1RM': parseFloat(calculate1RM(record.weight, record.reps).toFixed(2)),
   }));
 
+  const renderSidebarContent = () => {
+    if (isLoading) return <div className="loading-message">Lade...</div>;
+    if (error) return <div className="error-message">Fehler beim Laden.</div>;
+    if (exercises.length === 0) return <div className="no-data-message">Keine Übungen gefunden.</div>;
+
+    return (
+      <ul className="exercise-list">
+        {exercises.map(ex => (
+          <li key={ex.id} className="exercise-list-item">
+            <button
+              onClick={() => setSelectedExercise(ex)}
+              className={selectedExercise?.id === ex.id ? 'selected' : ''}
+            >
+              {ex.name}
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  const renderMainContent = () => {
+    if (isLoading) return null; // Hauptinhalt wird erst nach dem Laden angezeigt
+    if (error) return <div className="error-message">{error}</div>;
+    if (!selectedExercise) return <div className="welcome-message">Wähle eine Übung aus, um Details zu sehen.</div>;
+
+    return (
+      <div className="exercise-details">
+        <h1>{selectedExercise.name}</h1>
+        <div className="chart-container">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#555" />
+              <XAxis dataKey="date" stroke="#e0e0e0" />
+              <YAxis stroke="#e0e0e0" />
+              <Tooltip contentStyle={{ backgroundColor: '#242424', border: '1px solid #444' }} />
+              <Legend />
+              <Line type="monotone" dataKey="1RM" stroke="#4a90e2" strokeWidth={2} activeDot={{ r: 8 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <h2>Verlauf</h2>
+        <table className="records-table">
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Gewicht (kg)</th>
+              <th>Wdh.</th>
+              <th>Geschätztes 1RM (kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {selectedExercise.records.map((record, index) => (
+              <tr key={index}>
+                <td>{record.date}</td>
+                <td>{record.weight}</td>
+                <td>{record.reps}</td>
+                <td>{calculate1RM(record.weight, record.reps).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   return (
     <>
       <AppStyles />
       <div className="app-container">
         <aside className="sidebar">
           <h2>Übungen</h2>
-          {isLoading ? (
-            <div className="loading-message">Lade...</div>
-          ) : error ? (
-            <div className="error-message">Fehler</div>
-          ) : (
-            <ul className="exercise-list">
-              {exercises.map(ex => (
-                <li key={ex.id} className="exercise-list-item">
-                  <button
-                    onClick={() => setSelectedExercise(ex)}
-                    className={selectedExercise?.id === ex.id ? 'selected' : ''}
-                  >
-                    {ex.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          {renderSidebarContent()}
         </aside>
         <main className="main-content">
-          {error ? (
-             <div className="error-message">{error}</div>
-          ) : !selectedExercise && !isLoading ? (
-            <div className="welcome-message">Wähle eine Übung aus, um Details zu sehen.</div>
-          ) : selectedExercise && (
-            <div className="exercise-details">
-              <h1>{selectedExercise.name}</h1>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#555" />
-                    <XAxis dataKey="date" stroke="#e0e0e0" />
-                    <YAxis stroke="#e0e0e0" />
-                    <Tooltip contentStyle={{ backgroundColor: '#242424', border: '1px solid #444' }} />
-                    <Legend />
-                    <Line type="monotone" dataKey="1RM" stroke="#4a90e2" strokeWidth={2} activeDot={{ r: 8 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <h2>Verlauf</h2>
-              <table className="records-table">
-                <thead>
-                  <tr>
-                    <th>Datum</th>
-                    <th>Gewicht (kg)</th>
-                    <th>Wdh.</th>
-                    <th>Geschätztes 1RM (kg)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedExercise.records.map((record, index) => (
-                    <tr key={index}>
-                      <td>{record.date}</td>
-                      <td>{record.weight}</td>
-                      <td>{record.reps}</td>
-                      <td>{calculate1RM(record.weight, record.reps).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {renderMainContent()}
         </main>
       </div>
     </>
