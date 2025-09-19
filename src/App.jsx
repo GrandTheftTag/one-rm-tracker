@@ -141,21 +141,17 @@ function App() {
     const GOOGLE_SHEET_URL = `${proxyUrl}${encodeURIComponent(originalUrl)}`;
 
     const parseComplexSheet = (csvText) => {
-        // Robuster CSV-Parser, der mit Kommas in Anführungszeichen umgehen kann.
         const parseCsvRow = (rowStr) => {
             const columns = [];
             let currentField = '';
             let inQuotes = false;
             for (let i = 0; i < rowStr.length; i++) {
                 const char = rowStr[i];
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
+                if (char === '"') inQuotes = !inQuotes;
+                else if (char === ',' && !inQuotes) {
                     columns.push(currentField);
                     currentField = '';
-                } else {
-                    currentField += char;
-                }
+                } else currentField += char;
             }
             columns.push(currentField);
             return columns;
@@ -163,41 +159,30 @@ function App() {
 
         const exercisesMap = new Map();
         const rows = csvText.trim().split(/\r?\n/);
-
         const headerRow = rows.find(row => row.includes('Muskelgruppe'));
-        if (!headerRow) {
-            console.error("Konnte keine Header-Zeile mit 'Muskelgruppe' finden.");
-            return [];
-        }
+        if (!headerRow) return [];
         
         const headerColumns = parseCsvRow(headerRow).map(s => s.replace(/"/g, '').trim());
         const blockOffsets = [];
         headerColumns.forEach((col, index) => {
-            if (col === 'Muskelgruppe') {
-                blockOffsets.push(index);
-            }
+            if (col === 'Muskelgruppe') blockOffsets.push(index);
         });
 
-        if (blockOffsets.length === 0) {
-          console.error("Keine Trainings-Blöcke gefunden.");
-          return [];
-        }
+        if (blockOffsets.length === 0) return [];
         
-        let currentDay = '';
+        let currentDayLabel = '';
 
         rows.forEach(rowStr => {
             const columns = parseCsvRow(rowStr);
 
-            const dayMatch = columns.find(c => c.toLowerCase().replace(/"/g, '').startsWith('tag '));
-            if (dayMatch) {
-                currentDay = dayMatch.replace(/"/g, '').trim();
+            const dayLabelMatch = columns.find(c => c.toLowerCase().replace(/"/g, '').match(/^w\d\sgk\s?\d/));
+            if (dayLabelMatch) {
+                currentDayLabel = dayLabelMatch.replace(/"/g, '').trim();
                 return;
             }
 
             const firstExerciseName = columns[blockOffsets[0] + 2] ? columns[blockOffsets[0] + 2].replace(/"/g, '') : '';
-            if (!firstExerciseName || firstExerciseName.toLowerCase() === 'übung') {
-                return; 
-            }
+            if (!firstExerciseName || firstExerciseName.toLowerCase() === 'übung') return; 
 
             blockOffsets.forEach((offset, weekIndex) => {
                 const exerciseName = columns[offset + 2] ? columns[offset + 2].replace(/"/g, '').trim() : '';
@@ -205,9 +190,8 @@ function App() {
                 const repsStr = columns[offset + 7] ? columns[offset + 7].replace(/"/g, '').trim() : '';
                 const rirStr = columns[offset + 8] ? columns[offset + 8].replace(/"/g, '').trim() : '';
 
-                if (exerciseName && weightStr && repsStr && rirStr && currentDay) {
-                    const date = `Woche ${weekIndex + 1}, ${currentDay}`;
-                    
+                if (exerciseName && weightStr && repsStr && rirStr && currentDayLabel) {
+                    const date = currentDayLabel;
                     const weight = parseFloat(weightStr.replace(',', '.'));
                     const reps = parseFloat(repsStr.replace(',', '.'));
                     const rir = parseFloat(rirStr.replace(',', '.'));
@@ -228,7 +212,23 @@ function App() {
             });
         });
 
-        return Array.from(exercisesMap.values());
+        // Filtere für jeden Tag nur den Satz mit dem höchsten 1RM-Wert heraus
+        const filteredExercises = new Map();
+        for (const [name, data] of exercisesMap.entries()) {
+            const dailyMaxes = new Map();
+            data.records.forEach(record => {
+                const current1RM = calculate1RM(record.weight, record.reps, record.rir);
+                if (!dailyMaxes.has(record.date) || current1RM > dailyMaxes.get(record.date).max1RM) {
+                    dailyMaxes.set(record.date, { record, max1RM: current1RM });
+                }
+            });
+            filteredExercises.set(name, {
+                ...data,
+                records: Array.from(dailyMaxes.values()).map(item => item.record)
+            });
+        }
+
+        return Array.from(filteredExercises.values());
     };
 
     const loadExercises = async () => {
