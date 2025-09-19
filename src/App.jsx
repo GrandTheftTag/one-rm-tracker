@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-// Hilfsfunktion zur Berechnung des 1RM nach der Epley-Formel
-const calculate1RM = (weight, reps) => {
-  if (reps === 1) return weight;
+// Hilfsfunktion zur Berechnung des 1RM, die jetzt auch RIR (Reps in Reserve) berücksichtigt.
+const calculate1RM = (weight, reps, rir = 0) => {
   if (reps === 0) return 0;
-  return weight * (1 + reps / 30);
+  // Die effektiven Wiederholungen sind die gemachten Wiederholungen plus die, die noch im Tank waren.
+  const effectiveReps = reps + rir;
+  if (effectiveReps <= 1) return weight;
+  // Angepasste Epley-Formel
+  return weight * (1 + effectiveReps / 30);
 };
 
 // Styling-Komponente, um CSS in der JSX-Datei zu halten
@@ -137,62 +140,78 @@ function App() {
     const proxyUrl = 'https://api.allorigins.win/raw?url=';
     const GOOGLE_SHEET_URL = `${proxyUrl}${encodeURIComponent(originalUrl)}`;
 
+    const parseComplexSheet = (csvText) => {
+      const exercisesMap = new Map();
+      let currentWeek = '';
+      let currentDay = '';
+
+      const rows = csvText.trim().split(/\r?\n/);
+
+      rows.forEach(row => {
+        const columns = row.split(',').map(s => s.trim());
+
+        const weekMatch = columns.find(c => c.toLowerCase().startsWith('"woche '));
+        if (weekMatch) {
+            currentWeek = weekMatch.replace(/"/g, '').trim();
+            return;
+        }
+        
+        const dayMatch = columns.find(c => c.toLowerCase().startsWith('"tag '));
+         if (dayMatch) {
+            currentDay = dayMatch.replace(/"/g, '').trim();
+            return;
+        }
+
+        if (columns[1] === '"Muskelgruppe"') {
+          const exerciseName = columns[3] ? columns[3].replace(/"/g, '').trim() : '';
+          const weightStr = columns[7] ? columns[7].replace(/"/g, '').trim() : '';
+          const repsStr = columns[8] ? columns[8].replace(/"/g, '').trim() : '';
+          const rirStr = columns[9] ? columns[9].replace(/"/g, '').trim() : ''; // T-RIR extrahieren
+
+          if (exerciseName && weightStr && repsStr && rirStr && currentWeek && currentDay) {
+            const date = `${currentWeek.replace('Woche ', 'W')}, ${currentDay.replace('Tag ', 'T')}`;
+            
+            const weight = parseFloat(weightStr.replace(',', '.'));
+            const reps = parseFloat(repsStr.replace(',', '.'));
+            const rir = parseFloat(rirStr.replace(',', '.'));
+
+            if (!isNaN(weight) && !isNaN(reps) && !isNaN(rir)) {
+              const record = { date, weight, reps, rir }; // rir zum Datensatz hinzufügen
+
+              if (exercisesMap.has(exerciseName)) {
+                exercisesMap.get(exerciseName).records.push(record);
+              } else {
+                exercisesMap.set(exerciseName, {
+                  id: exercisesMap.size + 1,
+                  name: exerciseName,
+                  records: [record]
+                });
+              }
+            }
+          }
+        }
+      });
+      return Array.from(exercisesMap.values());
+    };
+
     const loadExercises = async () => {
       setIsLoading(true);
       setError(null);
-      console.log('Lade Daten von:', GOOGLE_SHEET_URL);
       try {
         const response = await fetch(GOOGLE_SHEET_URL);
-        if (!response.ok) {
-          throw new Error(`Netzwerk-Antwort war nicht ok. Status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Netzwerk-Antwort war nicht ok. Status: ${response.status}`);
+        
         const csvText = await response.text();
-        console.log('Rohdaten empfangen:', csvText);
+        if (!csvText || csvText.trim() === '') throw new Error('Die empfangenen Daten sind leer.');
 
-        if (!csvText || csvText.trim() === '') {
-            throw new Error('Die empfangenen Daten sind leer. Bitte prüfen Sie die Google Sheet URL und Freigabe.');
-        }
-        
-        const rows = csvText.trim().split(/\r?\n/).slice(1);
-        console.log(`Daten in ${rows.length} Zeilen aufgeteilt (ohne Kopfzeile).`);
-        
-        if (rows.length === 0) {
-           setExercises([]);
-           return;
-        }
+        const formattedExercises = parseComplexSheet(csvText);
 
-        const exercisesMap = new Map();
-        let invalidRowCount = 0;
-        rows.forEach((row, index) => {
-          if (row.trim() === '') return;
-          // KORREKTUR: Das Trennzeichen wurde auf Semikolon (;) geändert, was für deutsche CSV-Exporte üblich ist.
-          const columns = row.split(';').map(s => s.trim());
-          
-          if (columns.length < 4 || columns.slice(0, 4).some(c => c === '')) {
-            console.warn(`Zeile ${index + 2} wird übersprungen (ungültiges Format): "${row}"`);
-            invalidRowCount++;
-            return;
-          }
-
-          const [name, date, weight, reps] = columns;
-          const record = { date, weight: parseFloat(weight), reps: parseInt(reps, 10) };
-
-          if (exercisesMap.has(name)) {
-            exercisesMap.get(name).records.push(record);
-          } else {
-            exercisesMap.set(name, { id: exercisesMap.size + 1, name, records: [record] });
-          }
-        });
-
-        console.log(`Verarbeitung abgeschlossen. ${exercisesMap.size} Übungen gefunden. ${invalidRowCount} Zeilen übersprungen.`);
-        
-        const formattedExercises = Array.from(exercisesMap.values());
-        if (formattedExercises.length === 0 && rows.length > 0) {
-            throw new Error(`Daten wurden geladen, aber es konnten keine gültigen Übungen extrahiert werden. Bitte prüfen Sie das Spaltenformat in Ihrem Google Sheet.`);
+        if (formattedExercises.length === 0) {
+          throw new Error('Daten wurden geladen, aber es konnten keine Übungen aus Ihrer Tabellenstruktur extrahiert werden. Bitte stellen Sie sicher, dass die Struktur dem Trainingsplan entspricht.');
         }
 
         formattedExercises.forEach(ex => {
-            ex.records.sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
+            ex.records.sort((a, b) => a.date.localeCompare(b.date));
         });
         
         setExercises(formattedExercises);
@@ -201,8 +220,7 @@ function App() {
         }
 
       } catch (err) {
-        console.error("Fehler beim Laden oder Verarbeiten der Google Sheet-Daten:", err);
-        setError(`Fehler beim Laden der Daten. Bitte prüfen Sie die URL und die Internetverbindung.\nDetails: ${err.message}`);
+        setError(`Fehler: ${err.message}`);
       } finally {
         setIsLoading(false);
       }
@@ -213,12 +231,12 @@ function App() {
 
   const chartData = selectedExercise?.records.map(record => ({
     date: record.date,
-    '1RM': parseFloat(calculate1RM(record.weight, record.reps).toFixed(2)),
+    '1RM': parseFloat(calculate1RM(record.weight, record.reps, record.rir).toFixed(2)), // rir an die Funktion übergeben
   }));
 
   const renderSidebarContent = () => {
     if (isLoading) return <div className="loading-message">Lade...</div>;
-    if (error) return <div className="error-message">Fehler beim Laden.</div>;
+    if (error && exercises.length === 0) return <div className="error-message">Fehler beim Laden.</div>;
     if (exercises.length === 0) return <div className="no-data-message">Keine Übungen gefunden.</div>;
 
     return (
@@ -238,7 +256,7 @@ function App() {
   };
 
   const renderMainContent = () => {
-    if (isLoading) return null; // Hauptinhalt wird erst nach dem Laden angezeigt
+    if (isLoading) return <div className="loading-message">Lade und verarbeite Trainingsplan...</div>;
     if (error) return <div className="error-message">{error}</div>;
     if (!selectedExercise) return <div className="welcome-message">Wähle eine Übung aus, um Details zu sehen.</div>;
 
@@ -250,7 +268,7 @@ function App() {
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#555" />
               <XAxis dataKey="date" stroke="#e0e0e0" />
-              <YAxis stroke="#e0e0e0" />
+              <YAxis stroke="#e0e0e0" domain={['dataMin - 5', 'dataMax + 5']} />
               <Tooltip contentStyle={{ backgroundColor: '#242424', border: '1px solid #444' }} />
               <Legend />
               <Line type="monotone" dataKey="1RM" stroke="#4a90e2" strokeWidth={2} activeDot={{ r: 8 }} />
@@ -264,6 +282,7 @@ function App() {
               <th>Datum</th>
               <th>Gewicht (kg)</th>
               <th>Wdh.</th>
+              <th>RIR</th>
               <th>Geschätztes 1RM (kg)</th>
             </tr>
           </thead>
@@ -273,7 +292,8 @@ function App() {
                 <td>{record.date}</td>
                 <td>{record.weight}</td>
                 <td>{record.reps}</td>
-                <td>{calculate1RM(record.weight, record.reps).toFixed(2)}</td>
+                <td>{record.rir}</td>
+                <td>{calculate1RM(record.weight, record.reps, record.rir).toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
