@@ -141,57 +141,94 @@ function App() {
     const GOOGLE_SHEET_URL = `${proxyUrl}${encodeURIComponent(originalUrl)}`;
 
     const parseComplexSheet = (csvText) => {
-      const exercisesMap = new Map();
-      let currentWeek = '';
-      let currentDay = '';
+        // Robuster CSV-Parser, der mit Kommas in Anführungszeichen umgehen kann.
+        const parseCsvRow = (rowStr) => {
+            const columns = [];
+            let currentField = '';
+            let inQuotes = false;
+            for (let i = 0; i < rowStr.length; i++) {
+                const char = rowStr[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    columns.push(currentField);
+                    currentField = '';
+                } else {
+                    currentField += char;
+                }
+            }
+            columns.push(currentField);
+            return columns;
+        };
 
-      const rows = csvText.trim().split(/\r?\n/);
+        const exercisesMap = new Map();
+        const rows = csvText.trim().split(/\r?\n/);
 
-      rows.forEach(row => {
-        const columns = row.split(',').map(s => s.trim());
-
-        const weekMatch = columns.find(c => c.toLowerCase().startsWith('"woche '));
-        if (weekMatch) {
-            currentWeek = weekMatch.replace(/"/g, '').trim();
-            return;
+        const headerRow = rows.find(row => row.includes('Muskelgruppe'));
+        if (!headerRow) {
+            console.error("Konnte keine Header-Zeile mit 'Muskelgruppe' finden.");
+            return [];
         }
         
-        const dayMatch = columns.find(c => c.toLowerCase().startsWith('"tag '));
-         if (dayMatch) {
-            currentDay = dayMatch.replace(/"/g, '').trim();
-            return;
-        }
-
-        if (columns[1] === '"Muskelgruppe"') {
-          const exerciseName = columns[3] ? columns[3].replace(/"/g, '').trim() : '';
-          const weightStr = columns[7] ? columns[7].replace(/"/g, '').trim() : '';
-          const repsStr = columns[8] ? columns[8].replace(/"/g, '').trim() : '';
-          const rirStr = columns[9] ? columns[9].replace(/"/g, '').trim() : ''; // T-RIR extrahieren
-
-          if (exerciseName && weightStr && repsStr && rirStr && currentWeek && currentDay) {
-            const date = `${currentWeek.replace('Woche ', 'W')}, ${currentDay.replace('Tag ', 'T')}`;
-            
-            const weight = parseFloat(weightStr.replace(',', '.'));
-            const reps = parseFloat(repsStr.replace(',', '.'));
-            const rir = parseFloat(rirStr.replace(',', '.'));
-
-            if (!isNaN(weight) && !isNaN(reps) && !isNaN(rir)) {
-              const record = { date, weight, reps, rir }; // rir zum Datensatz hinzufügen
-
-              if (exercisesMap.has(exerciseName)) {
-                exercisesMap.get(exerciseName).records.push(record);
-              } else {
-                exercisesMap.set(exerciseName, {
-                  id: exercisesMap.size + 1,
-                  name: exerciseName,
-                  records: [record]
-                });
-              }
+        const headerColumns = parseCsvRow(headerRow).map(s => s.replace(/"/g, '').trim());
+        const blockOffsets = [];
+        headerColumns.forEach((col, index) => {
+            if (col === 'Muskelgruppe') {
+                blockOffsets.push(index);
             }
-          }
+        });
+
+        if (blockOffsets.length === 0) {
+          console.error("Keine Trainings-Blöcke gefunden.");
+          return [];
         }
-      });
-      return Array.from(exercisesMap.values());
+        
+        let currentDay = '';
+
+        rows.forEach(rowStr => {
+            const columns = parseCsvRow(rowStr);
+
+            const dayMatch = columns.find(c => c.toLowerCase().replace(/"/g, '').startsWith('tag '));
+            if (dayMatch) {
+                currentDay = dayMatch.replace(/"/g, '').trim();
+                return;
+            }
+
+            const firstExerciseName = columns[blockOffsets[0] + 2] ? columns[blockOffsets[0] + 2].replace(/"/g, '') : '';
+            if (!firstExerciseName || firstExerciseName.toLowerCase() === 'übung') {
+                return; 
+            }
+
+            blockOffsets.forEach((offset, weekIndex) => {
+                const exerciseName = columns[offset + 2] ? columns[offset + 2].replace(/"/g, '').trim() : '';
+                const weightStr = columns[offset + 6] ? columns[offset + 6].replace(/"/g, '').trim() : '';
+                const repsStr = columns[offset + 7] ? columns[offset + 7].replace(/"/g, '').trim() : '';
+                const rirStr = columns[offset + 8] ? columns[offset + 8].replace(/"/g, '').trim() : '';
+
+                if (exerciseName && weightStr && repsStr && rirStr && currentDay) {
+                    const date = `Woche ${weekIndex + 1}, ${currentDay}`;
+                    
+                    const weight = parseFloat(weightStr.replace(',', '.'));
+                    const reps = parseFloat(repsStr.replace(',', '.'));
+                    const rir = parseFloat(rirStr.replace(',', '.'));
+
+                    if (!isNaN(weight) && !isNaN(reps) && !isNaN(rir)) {
+                        const record = { date, weight, reps, rir };
+                        if (exercisesMap.has(exerciseName)) {
+                            exercisesMap.get(exerciseName).records.push(record);
+                        } else {
+                            exercisesMap.set(exerciseName, {
+                                id: exercisesMap.size + 1,
+                                name: exerciseName,
+                                records: [record]
+                            });
+                        }
+                    }
+                }
+            });
+        });
+
+        return Array.from(exercisesMap.values());
     };
 
     const loadExercises = async () => {
@@ -211,7 +248,7 @@ function App() {
         }
 
         formattedExercises.forEach(ex => {
-            ex.records.sort((a, b) => a.date.localeCompare(b.date));
+            ex.records.sort((a, b) => a.date.localeCompare(b.date, undefined, { numeric: true }));
         });
         
         setExercises(formattedExercises);
@@ -231,7 +268,7 @@ function App() {
 
   const chartData = selectedExercise?.records.map(record => ({
     date: record.date,
-    '1RM': parseFloat(calculate1RM(record.weight, record.reps, record.rir).toFixed(2)), // rir an die Funktion übergeben
+    '1RM': parseFloat(calculate1RM(record.weight, record.reps, record.rir).toFixed(2)),
   }));
 
   const renderSidebarContent = () => {
