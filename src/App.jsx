@@ -1,186 +1,162 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-// CSS-Stile sind jetzt direkt hier in der Komponente
+// Hilfsfunktion zur Berechnung des 1RM nach der Epley-Formel
+const calculate1RM = (weight, reps) => {
+  if (reps === 1) return weight;
+  if (reps === 0) return 0;
+  return weight * (1 + reps / 30);
+};
+
+// Styling-Komponente, um CSS in der JSX-Datei zu halten
 const AppStyles = () => (
   <style>{`
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-        sans-serif;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      background-color: #f4f7f6;
+    :root {
+      --bg-color: #1a1a1a;
+      --sidebar-bg: #242424;
+      --content-bg: #2c2c2c;
+      --text-color: #e0e0e0;
+      --primary-color: #4a90e2;
+      --border-color: #444;
+      --hover-bg: #333;
     }
-
-    .app-container {
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      background-color: var(--bg-color);
+      color: var(--text-color);
       display: flex;
       height: 100vh;
+      overflow: hidden;
     }
-
+    #root {
+      display: flex;
+      flex-grow: 1;
+    }
+    .app-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
     .sidebar {
       width: 280px;
-      background-color: #ffffff;
-      border-right: 1px solid #e0e0e0;
+      background-color: var(--sidebar-bg);
       padding: 20px;
-      box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+      border-right: 1px solid var(--border-color);
+      overflow-y: auto;
     }
-
     .sidebar h2 {
       margin-top: 0;
-      color: #333;
+      color: var(--primary-color);
     }
-
-    .sidebar ul {
-      list-style-type: none;
+    .exercise-list {
+      list-style: none;
       padding: 0;
       margin: 0;
     }
-
-    .sidebar li {
+    .exercise-list-item button {
+      width: 100%;
       padding: 12px 15px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background-color: var(--content-bg);
+      color: var(--text-color);
       cursor: pointer;
-      border-radius: 8px;
-      margin-bottom: 5px;
-      transition: background-color 0.2s, color 0.2s;
+      text-align: left;
+      font-size: 1rem;
+      transition: background-color 0.2s, border-color 0.2s;
     }
-
-    .sidebar li.active {
-      background-color: #8884d8;
+    .exercise-list-item button:hover {
+      background-color: var(--hover-bg);
+    }
+    .exercise-list-item button.selected {
+      background-color: var(--primary-color);
       color: white;
-      font-weight: bold;
+      border-color: var(--primary-color);
     }
-
-    .sidebar li:not(.active):hover {
-      background-color: #f0f0f0;
-    }
-    
-    .sidebar p {
-      color: #666;
-    }
-
     .main-content {
       flex-grow: 1;
       padding: 30px;
+      display: flex;
+      flex-direction: column;
       overflow-y: auto;
     }
-    
-    .main-content h1 {
-        margin-top: 0;
-    }
-    
-    .chart-container {
-      width: 100%;
-      height: 400px;
-      margin-bottom: 40px;
-    }
-
-    .records-table {
-      margin-top: 40px;
-    }
-
-    .records-table table {
-      width: 100%;
-      border-collapse: collapse;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .records-table th, .records-table td {
-      border-bottom: 1px solid #ddd;
-      padding: 12px 15px;
-      text-align: left;
-    }
-
-    .records-table th {
-      background-color: #f8f8f8;
-      font-weight: bold;
-    }
-    
-    .records-table tbody tr:hover {
-      background-color: #f5f5f5;
-    }
-
-    .placeholder {
+    .welcome-message, .loading-message, .error-message {
       display: flex;
       justify-content: center;
       align-items: center;
       height: 100%;
-      text-align: center;
+      font-size: 1.5rem;
       color: #888;
-      flex-direction: column;
     }
-    
     .error-message {
-      color: #d9534f;
-      background-color: #f2dede;
-      border: 1px solid #ebccd1;
-      padding: 15px;
-      border-radius: 8px;
-      margin: 10px 0;
+      color: #e24a4a;
       text-align: center;
+      white-space: pre-wrap;
+    }
+    .exercise-details h1 {
+      margin-top: 0;
+      color: var(--primary-color);
+    }
+    .chart-container {
+      width: 100%;
+      height: 400px;
+      background-color: var(--sidebar-bg);
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+    }
+    .records-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .records-table th, .records-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-color);
+      text-align: left;
+    }
+    .records-table th {
+      background-color: var(--hover-bg);
     }
   `}</style>
 );
-
 
 function App() {
   const [exercises, setExercises] = useState([]);
   const [selectedExercise, setSelectedExercise] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null); // Zustand für Fehlermeldungen
-
-  // Die Epley-Formel zur Berechnung des 1RM
-  const calculateOneRepMax = (weight, reps) => {
-    if (reps === 1) return weight;
-    if (reps === 0) return 0;
-    return weight * (1 + reps / 30);
-  };
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    // =====================================================================================
-    // HIER DEINEN GOOGLE SHEET CSV-LINK EINFÜGEN
-    // Gehe in Google Sheets auf Datei -> Freigeben -> Im Web veröffentlichen
-    // Wähle das richtige Tabellenblatt und als Format "Kommagetrennte Werte (.csv)"
-    // =====================================================================================
-    const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSDu2vNtDYtDmRQGM4wB4m0O49Ups3YsEcIfq4TBIzLjQICIWIQD7e97s18vxZCtGtk7X17r4adq9PG/pub?gid=506420951&single=true&output=csv';
+    const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSDu2vNtDYtDmRQGM4wB4m0O49Ups3YsEcIfq4TBIzLjQICIWIQD7e97s18vxZCtGtk7X17r4adq9PG/pub?gid=50642095_user_says:&single=true&output=csv';
 
     const loadExercises = async () => {
-      if (GOOGLE_SHEET_URL.includes('DEIN_KOPIERTER_GOOGLE_SHEET_CSV_LINK')) {
-        const errorMessage = "Aktion erforderlich: Bitte fügen Sie Ihren Google Sheet CSV-Link im Code ein.";
-        console.error(errorMessage);
-        setError(errorMessage); // Fehlermeldung für die UI setzen
-        setIsLoading(false);
-        return;
-      }
-      setError(null); // Fehler zurücksetzen, falls Link vorhanden ist
-      
+      setIsLoading(true);
+      setError(null);
       try {
         const response = await fetch(GOOGLE_SHEET_URL);
         if (!response.ok) {
-          throw new Error(`Netzwerk-Antwort war nicht ok: ${response.statusText}`);
+          throw new Error(`Netzwerk-Antwort war nicht ok. Status: ${response.status}`);
         }
         const csvText = await response.text();
         
         const rows = csvText.trim().split('\n').slice(1);
+        if (rows.length === 0) {
+           setExercises([]);
+           return;
+        }
+
         const exercisesMap = new Map();
-
         rows.forEach((row) => {
-          const columns = row.split(',');
-          if (columns.length < 4) return; 
+          const [name, date, weight, reps] = row.split(',').map(s => s.trim());
+          if (!name || !date || !weight || !reps) return;
 
-          const name = columns[0].trim();
-          const date = columns[1].trim();
-          const weight = parseFloat(columns[2]);
-          const reps = parseInt(columns[3], 10);
-          
-          if (!name || !date || isNaN(weight) || isNaN(reps)) {
-            return; 
-          }
-
-          const record = { date, weight, reps };
+          const record = {
+            date,
+            weight: parseFloat(weight),
+            reps: parseInt(reps, 10),
+          };
 
           if (exercisesMap.has(name)) {
             exercisesMap.get(name).records.push(record);
@@ -188,21 +164,22 @@ function App() {
             exercisesMap.set(name, {
               id: exercisesMap.size + 1,
               name: name,
-              records: [record]
+              records: [record],
             });
           }
         });
 
         const formattedExercises = Array.from(exercisesMap.values());
-        setExercises(formattedExercises);
+        formattedExercises.forEach(ex => {
+            // Konvertiert das Datum von TT.MM.JJJJ zu JJJJ-MM-TT für eine korrekte Sortierung
+            ex.records.sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
+        });
         
-        if (formattedExercises.length > 0) {
-          setSelectedExercise(formattedExercises[0]);
-        }
+        setExercises(formattedExercises);
 
-      } catch (error) {
-        console.error("Fehler beim Laden oder Verarbeiten der Google Sheet-Daten:", error);
-        setError("Daten konnten nicht geladen werden. Bitte Link und Freigabe prüfen.");
+      } catch (err) {
+        console.error("Fehler beim Laden oder Verarbeiten der Google Sheet-Daten:", err);
+        setError(`Fehler beim Laden der Daten. Bitte prüfen Sie die URL und die Internetverbindung.\nDetails: ${err.message}`);
       } finally {
         setIsLoading(false);
       }
@@ -212,88 +189,77 @@ function App() {
   }, []);
 
   const chartData = selectedExercise?.records.map(record => ({
-    ...record,
-    oneRepMax: parseFloat(calculateOneRepMax(record.weight, record.reps).toFixed(2))
-  })).sort((a, b) => new Date(a.date.split('.').reverse().join('-')) - new Date(b.date.split('.').reverse().join('-')));
-
+    date: record.date,
+    '1RM': parseFloat(calculate1RM(record.weight, record.reps).toFixed(2)),
+  }));
 
   return (
     <>
       <AppStyles />
       <div className="app-container">
-        <div className="sidebar">
+        <aside className="sidebar">
           <h2>Übungen</h2>
           {isLoading ? (
-            <p>Lade...</p>
-          ) : error ? (
-            <p className="error-message">{error}</p>
+            <div className="loading-message">Lade...</div>
           ) : (
-            <ul>
-              {exercises.map(exercise => (
-                <li 
-                  key={exercise.id} 
-                  className={selectedExercise?.id === exercise.id ? 'active' : ''}
-                  onClick={() => setSelectedExercise(exercise)}
-                >
-                  {exercise.name}
+            <ul className="exercise-list">
+              {exercises.map(ex => (
+                <li key={ex.id} className="exercise-list-item">
+                  <button
+                    onClick={() => setSelectedExercise(ex)}
+                    className={selectedExercise?.id === ex.id ? 'selected' : ''}
+                  >
+                    {ex.name}
+                  </button>
                 </li>
               ))}
             </ul>
           )}
-        </div>
-        <div className="main-content">
-          {selectedExercise ? (
-            <>
+        </aside>
+        <main className="main-content">
+          {error ? (
+             <div className="error-message">{error}</div>
+          ) : !selectedExercise ? (
+            <div className="welcome-message">Wähle eine Übung aus, um Details zu sehen.</div>
+          ) : (
+            <div className="exercise-details">
               <h1>{selectedExercise.name}</h1>
               <div className="chart-container">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis label={{ value: '1RM (kg)', angle: -90, position: 'insideLeft' }} />
-                    <Tooltip formatter={(value) => `${value} kg`} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#555" />
+                    <XAxis dataKey="date" stroke="#e0e0e0" />
+                    <YAxis stroke="#e0e0e0" />
+                    <Tooltip contentStyle={{ backgroundColor: '#242424', border: '1px solid #444' }} />
                     <Legend />
-                    <Line type="monotone" dataKey="oneRepMax" name="Geschätztes 1RM" stroke="#8884d8" activeDot={{ r: 8 }} />
+                    <Line type="monotone" dataKey="1RM" stroke="#4a90e2" strokeWidth={2} activeDot={{ r: 8 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="records-table">
-                <h3>Letzte Einträge</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Datum</th>
-                      <th>Gewicht (kg)</th>
-                      <th>Wdh.</th>
-                      <th>Geschätztes 1RM (kg)</th>
+              <h2>Verlauf</h2>
+              <table className="records-table">
+                <thead>
+                  <tr>
+                    <th>Datum</th>
+                    <th>Gewicht (kg)</th>
+                    <th>Wdh.</th>
+                    <th>Geschätztes 1RM (kg)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedExercise.records.map((record, index) => (
+                    <tr key={index}>
+                      <td>{record.date}</td>
+                      <td>{record.weight}</td>
+                      <td>{record.reps}</td>
+                      <td>{calculate1RM(record.weight, record.reps).toFixed(2)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {[...selectedExercise.records].reverse().map((record, index) => (
-                      <tr key={index}>
-                        <td>{record.date}</td>
-                        <td>{record.weight}</td>
-                        <td>{record.reps}</td>
-                        <td>{calculateOneRepMax(record.weight, record.reps).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <div className="placeholder">
-              <h2>Willkommen!</h2>
-               {isLoading ? (
-                <p>Daten werden geladen...</p>
-              ) : error ? (
-                <p className="error-message">{error}</p>
-              ) : (
-                <p>Wähle eine Übung aus, um deine Fortschritte zu sehen.</p>
-              )}
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+        </main>
       </div>
     </>
   );
