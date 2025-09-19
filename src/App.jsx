@@ -165,7 +165,8 @@ function App() {
         let invalidRowCount = 0;
         rows.forEach((row, index) => {
           if (row.trim() === '') return;
-          const columns = row.split(',').map(s => s.trim());
+          // KORREKTUR: Das Trennzeichen wurde auf Semikolon (;) geändert, was für deutsche CSV-Exporte üblich ist.
+          const columns = row.split(';').map(s => s.trim());
           
           if (columns.length < 4 || columns.slice(0, 4).some(c => c === '')) {
             console.warn(`Zeile ${index + 2} wird übersprungen (ungültiges Format): "${row}"`);
