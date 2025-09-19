@@ -1,8 +1,7 @@
 # one-rm-tracker
 
-Lokale Electron-App (macOS) zur Anzeige von 1RM-Verläufen aus einem öffentlichen Google Sheet.
+Web-App via vercel.app zum Anzeigen der 1RM-Entwicklung
 
-## Schnellstart (macOS)
+Keep getting stronger!
 
-1. Node installieren (LTS).
-2. Im Projektordner:
+
