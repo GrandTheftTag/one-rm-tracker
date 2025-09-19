@@ -176,9 +176,9 @@ function App() {
 
         rows.forEach(rowStr => {
             const columns = parseCsvRow(rowStr);
-            // ANPASSUNG: Sucht nach der Zeile, die die Tages-Labels enthält (z.B. W1 GK1)
-            const dayLabelIdentifier = columns[1] ? columns[1].replace(/"/g, '').trim() : '';
-            if (dayLabelIdentifier.match(/^W\d+\sGK\s?\d+/i)) {
+            // KORREKTUR: Scannt die ganze Zeile, um sie zuverlässig als Tages-Label-Zeile zu identifizieren.
+            const isDayLabelRow = columns.some(c => c.replace(/"/g, '').trim().match(/^W\d+\sGK\s?\d+/i));
+            if (isDayLabelRow) {
                 dayLabelsContext = blockOffsets.map(offset => columns[offset] ? columns[offset].replace(/"/g, '').trim() : '');
                 return; 
             }
@@ -286,10 +286,10 @@ function App() {
     loadExercises();
   }, []);
 
-  const chartData = selectedExercise?.records.map(record => ({
+  const chartData = selectedExercise?.records && Array.isArray(selectedExercise.records) ? selectedExercise.records.map(record => ({
     date: record.date,
     '1RM': parseFloat(calculate1RM(record.weight, record.reps, record.rir).toFixed(2)),
-  }));
+  })) : [];
 
   const renderSidebarContent = () => {
     if (isLoading) return <div className="loading-message">Lade...</div>;
@@ -344,7 +344,7 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {selectedExercise.records.map((record, index) => (
+            {selectedExercise.records && Array.isArray(selectedExercise.records) && selectedExercise.records.map((record, index) => (
               <tr key={index}>
                 <td>{record.date}</td>
                 <td>{record.weight}</td>
