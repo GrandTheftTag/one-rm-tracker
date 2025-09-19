@@ -159,39 +159,43 @@ function App() {
 
         const exercisesMap = new Map();
         const rows = csvText.trim().split(/\r?\n/);
+        
         const headerRow = rows.find(row => row.includes('Muskelgruppe'));
         if (!headerRow) return [];
         
-        const headerColumns = parseCsvRow(headerRow).map(s => s.replace(/"/g, '').trim());
+        const headerColumns = parseCsvRow(headerRow);
         const blockOffsets = [];
         headerColumns.forEach((col, index) => {
-            if (col === 'Muskelgruppe') blockOffsets.push(index);
+            if (col.replace(/"/g, '').trim() === 'Muskelgruppe') {
+                blockOffsets.push(index);
+            }
         });
-
         if (blockOffsets.length === 0) return [];
-        
-        let currentDayLabel = '';
+
+        let dayLabelsContext = [];
 
         rows.forEach(rowStr => {
             const columns = parseCsvRow(rowStr);
-
-            const dayLabelMatch = columns.find(c => c.toLowerCase().replace(/"/g, '').match(/^w\d\sgk\s?\d/));
-            if (dayLabelMatch) {
-                currentDayLabel = dayLabelMatch.replace(/"/g, '').trim();
-                return;
+            // ANPASSUNG: Sucht nach der Zeile, die die Tages-Labels enthält (z.B. W1 GK1)
+            const dayLabelIdentifier = columns[1] ? columns[1].replace(/"/g, '').trim() : '';
+            if (dayLabelIdentifier.match(/^W\d+\sGK\s?\d+/i)) {
+                dayLabelsContext = blockOffsets.map(offset => columns[offset] ? columns[offset].replace(/"/g, '').trim() : '');
+                return; 
             }
 
-            const firstExerciseName = columns[blockOffsets[0] + 2] ? columns[blockOffsets[0] + 2].replace(/"/g, '') : '';
+            const firstExerciseName = columns[blockOffsets[0] + 2] ? columns[blockOffsets[0] + 2].replace(/"/g, '').trim() : '';
             if (!firstExerciseName || firstExerciseName.toLowerCase() === 'übung') return; 
 
             blockOffsets.forEach((offset, weekIndex) => {
+                const date = dayLabelsContext[weekIndex];
+                if (!date || !date.match(/^W\d+\sGK\s?\d+/i)) return;
+
                 const exerciseName = columns[offset + 2] ? columns[offset + 2].replace(/"/g, '').trim() : '';
                 const weightStr = columns[offset + 6] ? columns[offset + 6].replace(/"/g, '').trim() : '';
                 const repsStr = columns[offset + 7] ? columns[offset + 7].replace(/"/g, '').trim() : '';
                 const rirStr = columns[offset + 8] ? columns[offset + 8].replace(/"/g, '').trim() : '';
 
-                if (exerciseName && weightStr && repsStr && rirStr && currentDayLabel) {
-                    const date = currentDayLabel;
+                if (exerciseName && weightStr && repsStr && rirStr) {
                     const weight = parseFloat(weightStr.replace(',', '.'));
                     const reps = parseFloat(repsStr.replace(',', '.'));
                     const rir = parseFloat(rirStr.replace(',', '.'));
@@ -212,7 +216,6 @@ function App() {
             });
         });
 
-        // Filtere für jeden Tag nur den Satz mit dem höchsten 1RM-Wert heraus
         const filteredExercises = new Map();
         for (const [name, data] of exercisesMap.entries()) {
             const dailyMaxes = new Map();
@@ -247,8 +250,25 @@ function App() {
           throw new Error('Daten wurden geladen, aber es konnten keine Übungen aus Ihrer Tabellenstruktur extrahiert werden. Bitte stellen Sie sicher, dass die Struktur dem Trainingsplan entspricht.');
         }
 
+        // ANPASSUNG: Verbesserte Sortierfunktion
+        const customSort = (a, b) => {
+            const regex = /W(\d+)\sGK\s?(\d+)/i;
+            const matchA = a.date.match(regex);
+            const matchB = b.date.match(regex);
+
+            if (!matchA || !matchB) return a.date.localeCompare(b.date);
+
+            const weekA = parseInt(matchA[1], 10);
+            const dayA = parseInt(matchA[2], 10);
+            const weekB = parseInt(matchB[1], 10);
+            const dayB = parseInt(matchB[2], 10);
+
+            if (weekA !== weekB) return weekA - weekB;
+            return dayA - dayB; // Sortiert nach GK-Nummer, wenn die Woche gleich ist
+        };
+
         formattedExercises.forEach(ex => {
-            ex.records.sort((a, b) => a.date.localeCompare(b.date, undefined, { numeric: true }));
+            ex.records.sort(customSort);
         });
         
         setExercises(formattedExercises);
